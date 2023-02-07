@@ -1,0 +1,582 @@
+---
+title: "Excess mortality in Northern Ireland"
+format: pptx
+editor: visual
+slide-level: 3
+---
+
+## All persons
+
+```{r}
+#| label: libraries
+#| echo: false
+#| message: false
+#| warning: false
+
+source(here::here("R/00_libraries.R"))
+
+```
+
+
+```{r}
+#| echo: false
+#| label: data
+
+predictions <- read.csv(
+  here::here("outputs/predictions/All Persons.csv")) |> 
+  mutate(
+    week_ending = as.Date(week_ending),
+    across(c(areacode, age_group, sex, deprivation_quintile),
+           \(x) factor(x))
+  )
+
+registered_deaths <- readxl::read_excel(
+  here::here("data/Data for modelling - 2015-Qtr 3 2022.xlsx"),
+  sheet = "All Persons"
+) |> 
+  rename(
+    areacode = "Local Government District",
+    deprivation_quintile = "MDM Quintile",
+    week_ending = "Date",
+    age_group = "Age_Group",
+    registered = "Number of Deaths"
+  ) |> 
+  mutate(
+    week_ending = as.Date(week_ending),
+    across(c(areacode, age_group, sex, deprivation_quintile),
+           \(x) factor(x))
+  )
+
+excess <- predictions |> 
+  left_join(registered_deaths,
+            by = c("areacode",
+                   "age_group", 
+                   "sex",
+                   "deprivation_quintile",
+                   "week_ending")) |> 
+  rename(expected = "expected_deaths") |> 
+  filter(
+    week_ending <= as.Date("2022-09-30")
+  ) |> 
+  mutate(
+    across(
+      c(expected, registered),
+      ~ case_when(
+      is.na(.x) ~ 0,
+      TRUE ~ .x
+    )),
+    sex = factor(sex,
+                 levels = c("0", "1"),
+                 labels = c("Male", "Female")),
+    deprivation_quintile = factor(deprivation_quintile,
+                                  levels = as.character(1:5),
+                                  labels = c("Quintile 1 - most deprived",
+                                             "Quintile 2",
+                                             "Quintile 3",	
+                                             "Quintile 4",
+                                             "Quintile 5 - least deprived")),
+    age_group = factor(age_group,
+                       levels = c("85+", "75-84", "65-74", "50-64", "25-49", "0-24"))
+  )
+
+total_excess <- sum(excess$registered) - sum(excess$expected)
+
+```
+
+```{r}
+#| label: chart-functions
+#| echo: false
+
+cumulative_excess <- function(data, y_axis, facet, title) {
+  
+  fill_colours <- c("neg" = "darkblue",
+                    "pos" = "lightblue")
+
+  cumulative_excess <- data |> 
+    group_by(
+      across(
+        c({{ y_axis }}, {{ facet }})
+      )
+    ) |> 
+    summarise(
+      excess = sum(registered) - sum(expected),
+      .groups = "drop") |> 
+    mutate(
+      sign = case_when(
+        excess > 0 ~ "pos",
+        TRUE ~ "neg"
+        )) |> 
+    ggplot(
+      aes(
+        x = excess,
+        y = {{ y_axis }})
+      ) +
+    geom_col(
+      aes(
+        fill = sign),
+      show.legend = FALSE) +
+    scale_fill_manual(
+      values = fill_colours
+      ) +
+    theme_bw() +
+    labs(
+      title = title,
+      y = "",
+      x = "Excess deaths"
+      ) +
+    facet_wrap(
+      facets = vars({{ facet }})
+    )
+  
+  return(cumulative_excess)
+}
+
+
+cumulative_ratio <- function(data, y_axis, facet, title, line_width = 20) {
+  
+  fill_colours <- c("neg" = "darkblue",
+                    "pos" = "lightblue")
+
+  cumulative_ratio_chart <- data |> 
+    group_by(
+      across(
+        c({{ y_axis }}, {{ facet }})
+      )
+    ) |> 
+    summarise(
+      across(c(registered, expected),
+             sum),
+      .groups = "drop") |> 
+    mutate(
+      expected = case_when(
+        expected < 1 ~ 0,
+        TRUE ~ expected
+      ),
+      ratio = registered / expected,
+      pos_neg = case_when(
+        ratio > 1 ~ "pos",
+        TRUE ~ "neg"
+        )
+      ) |>  
+    ggplot(aes(y = {{ y_axis }},
+               x = ratio)) +
+    geom_segment(aes(
+      yend = {{ y_axis }},
+      x = 1,
+      xend = ratio,
+      colour = pos_neg),
+      linewidth = line_width
+      ) +
+    scale_colour_manual(name = "",
+                        values = fill_colours) +
+    theme_bw() +
+    theme(legend.position = "none") +
+    labs(title = title,
+         y = "", 
+         x = "Ratio (registered / expected)") +
+    scale_x_continuous(
+      expand = expansion(mult = c(0.2, 0.1)
+    )) +
+    facet_wrap(
+      facets = vars({{ facet }})
+    )
+  
+  return(cumulative_ratio_chart)
+}
+
+```
+
+For the period of week ending `r min(excess$week_ending)` to week ending `r max(excess$week_ending)` there were `r scales::comma(total_excess)` excess deaths.
+
+---
+
+### All persons weekly excess
+
+```{r all-persons-weekly}
+#| label: all-persons-weekly
+#| echo: false
+
+excess |> 
+  group_by(week_ending) |> 
+  summarise(
+    across(
+      c(registered, expected),
+      \(x) sum(x, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  ) |> 
+  mutate(excess = registered - expected,
+         sign = case_when(
+           excess > 0 ~ "pos",
+           TRUE ~ "neg"
+         )) |> 
+  ggplot(
+    aes(x = week_ending)
+  ) +
+  geom_col(
+    aes(
+      y = excess,
+      fill = sign),
+    show.legend = FALSE) +
+  scale_fill_manual(
+    values = c("pos" = "lightblue",
+               "neg" = "darkblue")
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Weekly all persons excess deaths in Northern Ireland",
+    x = "Week ending",
+    y = "Excess deaths"
+  )
+
+```
+
+## Age and Sex
+
+### Cumulative sex-age - Excess
+
+```{r}
+#| label: sex-age-excess
+
+
+excess |> 
+  cumulative_excess(
+    y_axis = age_group,
+    facet = sex,
+    paste(
+      "Cumulative excess deaths by age group and sex between week ending",
+      paste(range(excess$week_ending),
+            collapse = " and week ending ")
+  ))
+  
+
+```
+
+### Cumulative sex-age - Ratio of registered to expected
+
+```{r}
+#| label: sex-age-ratio
+
+
+excess |> 
+  cumulative_ratio(
+    y_axis = age_group,
+    facet = sex,
+    paste(
+      "Cumulative ratio of registered to expected deaths by\nage group and sex between week ending",
+      paste(range(excess$week_ending),
+            collapse = " and week ending ")
+  ))
+  
+
+```
+
+## Deprivation and Sex
+
+### Cumulative sex-deprivation - Excess
+
+```{r}
+#| label: sex-deprivation-excess
+
+excess |> 
+  cumulative_excess(
+    y_axis = deprivation_quintile,
+    facet = sex,
+    paste(
+      "Cumulative excess deaths by deprivation quintile and sex\nbetween week ending",
+      paste(range(excess$week_ending),
+            collapse = " and week ending ")
+  ))
+  
+
+```
+
+### Cumulative sex-deprivation - Ratio of registered to expected
+
+```{r}
+#| label: sex-deprivation-ratio
+
+excess |> 
+  cumulative_ratio(
+    y_axis = deprivation_quintile,
+    facet = sex,
+    title = paste(
+      "Cumulative ratio of registered to expected deaths by\ndeprivation quintile and sex between week ending",
+      paste(range(excess$week_ending),
+            collapse = " and week ending ")),
+    line_width = 24
+  )
+  
+
+```
+
+## Area and age
+
+### Cumulative area-age - Excess
+
+```{r}
+#| label: area-age-excess
+
+excess |> 
+  cumulative_excess(
+    y_axis = age_group,
+    facet = areacode,
+    paste(
+      "Cumulative excess deaths by age group and geography between week ending",
+      paste(range(excess$week_ending),
+            collapse = " and week ending ")
+  ))
+  
+
+```
+
+### Cumulative area-age - Ratio of registered to expected
+
+```{r}
+#| label: area-age-ratio
+
+excess |> 
+  cumulative_ratio(
+    y_axis = age_group,
+    facet = areacode,
+    title = paste(
+      "Cumulative ratio of registered to expected deaths by\nage group and geography  between week ending",
+      paste(range(excess$week_ending),
+            collapse = " and week ending ")
+      ),
+    line_width = 5)
+  
+
+```
+
+
+## Cause of death
+
+```{r}
+#| label: cause-data
+
+files <- list.files(here::here(
+  "outputs/predictions"
+))
+
+remove_files <- paste0(
+  c(
+    "All Persons",
+    "Care Home",
+    "Home",
+    "Hospice",
+    "Hospital",
+    "Other"
+    ),
+  ".csv")
+
+files <- files[!(files %in% remove_files)]
+files <- setNames(
+  here::here(
+  paste0("outputs/predictions/",
+         files)),
+  nm = gsub(".csv", "", files))
+
+cause_expected <- purrr::map_df(
+  files,
+  .f = read.csv,
+  .id = "disease"
+)
+
+cause_registered <- setNames(
+  names(files),
+  nm = names(files)
+) |> 
+  purrr::map_df(
+  ~ readxl::read_excel(
+    here::here("data/Data for modelling - 2015-Qtr 3 2022.xlsx"),
+    sheet = .x
+  ),
+  .id = "disease"
+) |> 
+  rename(
+      areacode = "Local Government District",
+      week_ending = "Date",
+      age_group = "Age_Group",
+      registered = "Number of Deaths"
+    ) |> 
+  mutate(week_ending = as.character(week_ending))
+
+
+cause_excess <- cause_expected |> 
+  left_join(cause_registered,
+            by = c(
+              "disease",
+              "areacode",
+              "age_group", 
+              "sex",
+              "week_ending")) |> 
+  rename(
+    expected = "expected_deaths") |> 
+  filter(
+    week_ending <= as.Date("2022-09-30")
+  ) |> 
+  mutate(
+    across(
+      c(expected, registered),
+      ~ case_when(
+      is.na(.x) ~ 0,
+      TRUE ~ .x
+    )),
+    sex = factor(sex,
+                 levels = c("0", "1"),
+                 labels = c("Male", "Female")),
+    age_group = factor(age_group,
+                       levels = c("85+", "75-84", "65-74", "50-64", "25-49", "0-24"))
+  )
+```
+
+### Cumulative cause of death and age - Excess
+
+```{r}
+#| label: cause-age-excess
+
+cause_excess |> 
+  cumulative_excess(
+    y_axis = age_group,
+    facet = disease,
+    paste(
+      "Cumulative excess deaths by age group and condition between week ending",
+      paste(range(excess$week_ending),
+            collapse = " and week ending ")
+  ))
+  
+
+```
+
+### Cumulative cause of death - Ratio of registered to expected
+
+```{r}
+#| label: cause-age-ratio
+
+cause_excess |> 
+  cumulative_ratio(
+    y_axis = age_group,
+    facet = disease,
+    title = paste(
+      "Cumulative ratio of registered to expected deaths by\nage group and condition between week ending",
+      paste(range(excess$week_ending),
+            collapse = " and week ending ")
+      ),
+    line_width = 3)
+  
+
+```
+
+
+## Place of death
+
+```{r}
+#| label: place-data
+
+files <- paste0(
+  c(
+    "Care Home",
+    "Home",
+    "Hospice",
+    "Hospital",
+    "Other"
+    ),
+  ".csv")
+
+files <- setNames(
+  here::here(
+  paste0("outputs/predictions/",
+         files)),
+  nm = gsub(".csv", "", files))
+
+place_expected <- purrr::map_df(
+  files,
+  .f = read.csv,
+  .id = "place"
+)
+
+place_registered <- setNames(
+  names(files),
+  nm = names(files)
+) |> 
+  purrr::map_df(
+  ~ readxl::read_excel(
+    here::here("data/Data for modelling - 2015-Qtr 3 2022.xlsx"),
+    sheet = .x
+  ),
+  .id = "place"
+) |> 
+  rename(
+      areacode = "Local Government District",
+      week_ending = "Date",
+      age_group = "Age_Group",
+      registered = "Number of Deaths"
+    ) |> 
+  mutate(week_ending = as.character(week_ending))
+
+
+place_excess <- place_expected |> 
+  left_join(place_registered,
+            by = c(
+              "place",
+              "areacode",
+              "age_group", 
+              "sex",
+              "week_ending")) |> 
+  rename(
+    expected = "expected_deaths") |> 
+  filter(
+    week_ending <= as.Date("2022-09-30")
+  ) |> 
+  mutate(
+    across(
+      c(expected, registered),
+      ~ case_when(
+      is.na(.x) ~ 0,
+      TRUE ~ .x
+    )),
+    sex = factor(sex,
+                 levels = c("0", "1"),
+                 labels = c("Male", "Female")),
+    age_group = factor(age_group,
+                       levels = c("85+", "75-84", "65-74", "50-64", "25-49", "0-24"))
+  )
+```
+
+### Cumulative place of death and age - Excess
+
+```{r}
+#| label: place-age-excess
+
+place_excess |> 
+  cumulative_excess(
+    y_axis = age_group,
+    facet = place,
+    paste(
+      "Cumulative excess deaths by age group and place of death between week ending",
+      paste(range(place_excess$week_ending),
+            collapse = " and week ending ")
+  ))
+  
+
+```
+
+### Cumulative place of death - Ratio of registered to expected
+
+```{r}
+#| label: place-age-ratio
+
+place_excess |> 
+  cumulative_ratio(
+    y_axis = age_group,
+    facet = place,
+    title = paste(
+      "Cumulative ratio of registered to expected deaths by\nage group and place of death between week ending",
+      paste(range(place_excess$week_ending),
+            collapse = " and week ending ")
+      ),
+    line_width = 8)
+  
+
+```
