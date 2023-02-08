@@ -6,3 +6,57 @@
 This project is to support the UK four nations to calculate their excess
 mortality in the same way that the Office for Health Improvement and
 Disparities has done so for England through the course of the pandemic.
+
+# Data requirements
+
+To calculate excess deaths like in this repository, the following data
+is needed:
+
+- annual mid-year population estimates for the years of the baseline
+  period (including an extra year before and after this period), and the
+  years for the period for the expected (again, including an extra year
+  before and after). These data should have the following fields:
+
+  - areacode
+  - sex
+  - age_group
+  - deprivation_quintile (optional)
+  - population
+
+- weekly registered deaths for the baseline period and the expected
+  period. The week dates should be for the Friday, which represents the
+  period Saturday to Friday. The following fields are required:
+
+  - week_ending
+  - areacode
+  - sex
+  - age_group
+  - deprivation_quintile (optional)
+  - registered_deaths
+
+# Cloning the repository
+
+Use the following code in your Git system to clone this repository
+locally:
+
+    git clone https://github.com/DataS-DHSC/excess_deaths_northern_ireland.git
+
+# Recreating package versions using `renv`
+
+Package versioning with this project is being done using the renv
+package. If this package isn’t installed already then it will be
+installed upon opening the `.Rproj` file.
+
+To ensure versions used locally with this project are consistent, the
+user must run the following line once in the console:
+
+    renv::restore()
+
+# Navigating the repository
+
+The folder structure can be described as follows:
+
+    +-- data/ - store raw input data here
+    +-- outputs/ - the outputs can be stored here. Suggested folders are for dispersion_parameters, models, predictions, visualisations
+    +-- R/ - contains R scripts labelled in order of how they are used and what purpose the have
+    +-- renv/ - automatically generated using the renv package, no need to modify
